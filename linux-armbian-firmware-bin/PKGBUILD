@@ -1,0 +1,52 @@
+# Maintainer: hefeng <a520ass@hotmail.com>
+
+_desc="meson64 AArch64-focused fork aiming to increase usability. Prebuilt by armbian."
+_pkgver_main=22.11.1
+_pkgver_uname="${_pkgver_main}"
+_url_repo="https://mirrors.aliyun.com"
+_url_raw="${_url_repo}/armbian/pool/main/a/armbian-firmware"
+_pkgbase=linux-armbian-firmware
+
+pkgbase="${_pkgbase}-bin"
+pkgname=(
+  "${pkgbase}"
+)
+pkgver="${_pkgver_main}"
+pkgrel=1
+arch=('aarch64')
+url="${_url_repo}"
+license=('GPL2')
+options=(!strip)
+source=(
+  "linux-firmware-${_pkgver_uname}.deb::${_url_raw}/armbian-firmware_${_pkgver_uname}_all.deb"
+)
+noextract=("${source[@]%%::*}")
+sha256sums=(
+  'SKIP'
+)
+
+
+package_linux-armbian-firmware-bin() {
+  pkgdesc="The Linux firmware - ${_desc}"
+  depends=(
+    'coreutils'
+    'initramfs'
+    'kmod'
+  )
+  optdepends=(
+  )
+  provides=(
+    "${_pkgbase}=${pkgver}"
+  )
+  conflicts=(
+    "${_pkgbase}"
+    'linux-firmware'
+  )
+
+  # Install 
+  install -d -m 755 "${pkgdir}/usr"
+  ar -vx "${srcdir}/linux-firmware-${_pkgver_uname}.deb"
+  tar -C "${pkgdir}" -xvJf "${srcdir}/data.tar.xz"
+  cp -rf "${pkgdir}/lib" "${pkgdir}/usr"
+  rm -rf "${pkgdir}/lib"
+}

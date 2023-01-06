@@ -1,0 +1,116 @@
+# Maintainer: hefeng <a520ass@hotmail.com>
+
+_desc="meson64 AArch64-focused fork aiming to increase usability. Prebuilt by armbian."
+_pkgver_main=6.0.10
+_armbian_branch=edge
+_armbian_version=22.11.1
+_pkgver_suffix=meson64
+_pkgver_uname="${_pkgver_main}-${_pkgver_suffix}"
+_url_repo="https://mirrors.aliyun.com"
+_url_raw="${_url_repo}/armbian/pool/main/l/linux-${_pkgver_uname}"
+_pkgbase=linux-aarch64-meson64
+
+pkgbase="${_pkgbase}-bin"
+pkgname=(
+  "${pkgbase}"
+  "${pkgbase}-headers"
+  "${pkgbase}-dtb"
+)
+pkgver="${_pkgver_main}"
+pkgrel=1
+arch=('aarch64')
+url="${_url_repo}"
+license=('GPL2')
+options=(!strip)
+source=(
+  "linux-dtb-${_pkgver_uname}.deb::${_url_raw}/linux-dtb-${_armbian_branch}-${_pkgver_suffix}_${_armbian_version}_arm64.deb"
+  "linux-headers-${_pkgver_uname}.deb::${_url_raw}/linux-headers-${_armbian_branch}-${_pkgver_suffix}_${_armbian_version}_arm64.deb"
+  "linux-image-${_pkgver_uname}.deb::${_url_raw}/linux-image-${_armbian_branch}-${_pkgver_suffix}_${_armbian_version}_arm64.deb"
+)
+noextract=("${source[@]%%::*}")
+sha256sums=(
+  'SKIP'
+  'SKIP'
+  'SKIP'
+)
+
+_dtb_common_pkg="${_pkgbase}-dtb"
+
+package_linux-aarch64-meson64-bin() {
+  pkgdesc="The Linux Kernel and module - ${_desc}"
+  depends=(
+    "${_dtb_common_pkg}"
+    'coreutils'
+    'initramfs'
+    'kmod'
+  )
+  optdepends=(
+    'uboot-legacy-initrd-hooks: to generate uboot legacy initrd images'
+    'linux-firmware: firmware for linux'
+    'wireless-regdb: to set the correct wireless channels of your country'
+    "${_pkgbase}-dtb: dtbs for linux"
+  )
+  provides=(
+    "${_pkgbase}=${pkgver}"
+  )
+  conflicts=(
+    "${_pkgbase}"
+  )
+  backup=(
+    "etc/mkinitcpio.d/${_pkgbase}.preset"
+  )
+
+  # Install Image
+  install -d -m 755 "${pkgdir}/usr/lib/modules"
+  ar -vx "${srcdir}/linux-image-${_pkgver_uname}.deb"
+  tar -C "${pkgdir}" -xvJf "${srcdir}/data.tar.xz"
+  cp -rf "${pkgdir}/lib" "${pkgdir}/usr"
+  rm -rf "${pkgdir}/lib"
+  rm -rf "${pkgdir}/etc/kernel"
+  rm -rf "${pkgdir}/usr/share"
+
+  # Install pkgbase
+  local _dir_module="${pkgdir}/usr/lib/modules/${_pkgver_uname}"
+    echo "${_pkgbase}" | install -D -m 644 /dev/stdin "${_dir_module}/pkgbase"
+
+  # Install kernel itself
+  local _vmlinuz="vmlinuz-${_pkgver_uname}"
+  cp -f "${pkgdir}/boot/${_vmlinuz}" "${_dir_module}/vmlinuz"
+
+  # install mkinitcpio preset file
+  sed "s|%PKGBASE%|${_pkgbase}|g" ../linux.preset |
+    install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${_pkgbase}.preset"
+}
+
+package_linux-aarch64-meson64-bin-headers() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
+  provides=(
+    "${_pkgbase}-headers=${pkgver}"
+  )
+  conflicts=(
+    "${_pkgbase}-headers"
+  )
+  ar -vx "${srcdir}/linux-headers-${_pkgver_uname}.deb"
+  tar -C "${pkgdir}" -xvJf "${srcdir}/data.tar.xz"
+  cp -rf "${pkgdir}/lib" "${pkgdir}/usr"
+  rm -rf "${pkgdir}/lib"
+  rm -rf "${pkgdir}/usr/share"
+}
+
+_dtb_common_provides="${_dtb_common_pkg}=${pkgver}"
+
+package_linux-aarch64-meson64-bin-dtb() {
+  pkgdesc="DTB files for Amlogic SoCs for meson64 AArch64 kernel"
+  provides=(
+    "${_dtb_common_provides}"
+    "${_pkgbase}-dtb=${pkgver}"
+  )
+  conflicts=(
+    "${_pkgbase}-dtb"
+  )
+  install -d -m 755 "${pkgdir}/boot/dtbs"
+  ar -vx "${srcdir}/linux-dtb-${_pkgver_uname}.deb"
+  tar -C "${pkgdir}" -xvJf "${srcdir}/data.tar.xz"
+  rm -rf "${pkgdir}/usr/share"
+  cp -rf "${pkgdir}/boot/dtb-${_pkgver_uname}" "${pkgdir}/boot/dtbs/${_pkgbase}"
+}
