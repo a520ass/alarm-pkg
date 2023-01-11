@@ -14,7 +14,7 @@ url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc' 'cpio' 'patchutils')
 options=('!strip')
-source=("${_srcname}.tar.xz::http://www.kernel.org/pub/linux/kernel/v6.x/linux-${pkgver}.tar.xz"
+source=("http://www.kernel.org/pub/linux/kernel/v6.x/${_srcname}.tar.xz"
         "http://www.kernel.org/pub/linux/kernel/v6.x/patch-${pkgver}.xz"
         'armbian_build::git+https://github.com/a520ass/build.git#branch=master'
         'meson-gxl-s905d-phicomm-n1-dts.patch'
