@@ -4,7 +4,7 @@
 buildarch=8
 
 pkgbase=linux-meson64
-_srcname=linux-7.3
+_srcname=linux-7.3.6
 _kernelname=${pkgbase#linux}
 _desc="AArch64 meson64"
 pkgver=7.3.6
@@ -15,13 +15,11 @@ license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc' 'cpio' 'patchutils')
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v7.x/${_srcname}.tar.xz"
-        "http://www.kernel.org/pub/linux/kernel/v7.x/patch-${pkgver}.xz"
         'armbian_build::git+https://github.com/armbian/build.git#tag=v26.11.0-trunk.140'
         'linux.preset'
         '60-linux.hook'
         '90-linux.hook')
 md5sums=('SKIP'
-         'SKIP'
          'SKIP'
          '41cb5fef62715ead2dd109dbea8413d6'
          '0a5f16bfec6ad982a2f6782724cca8ba'
