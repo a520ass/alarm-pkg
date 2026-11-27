@@ -38,7 +38,7 @@ prepare() {
   # add upstream patch
   git apply --whitespace=nowarn ../patch-${pkgver}
 
-  for patch in `find ${srcdir}/armbian_build/patch/kernel/meson64-edge/*.patch | LC_ALL=C sort -u`
+  for patch in `find ${srcdir}/armbian_build/patch/kernel/archive/meson64-7.3/*.patch | LC_ALL=C sort -u`
   do
       # detect and remove files which patch will create
       lsdiff -s --strip=1 "${patch}" | grep '^+' | awk '{print $2}' | xargs -I % sh -c 'rm -f %'
