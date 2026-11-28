@@ -1,0 +1,246 @@
+name: Build Arch PKG (arm64)
+
+# 放在「存放三个 build-*.sh 的仓库」里：.github/workflows/build-pkg.yml
+# 三个脚本默认取仓库根目录，可用 script_dir 指向子目录（如 scripts）
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'PKGBUILD 所在 git 仓库 https 地址（AUR 可填 https://aur.archlinux.org/xxx.git；用 target 指定 AUR 包名时可留空）'
+        required: false
+        default: ''
+      repo_ref:
+        description: '分支 / tag / commit（留空用默认分支）'
+        required: false
+        default: ''
+      pkg_dir:
+        description: 'PKGBUILD 所在目录（相对仓库根，仓库根就填 .）'
+        required: false
+        default: '.'
+      script:
+        description: '使用哪个构建脚本'
+        required: true
+        type: choice
+        default: 'build-pkg.sh'
+        options:
+          - build-pkg.sh
+          - build-aur-pkg.sh
+          - build-paru-pkg.sh
+      target:
+        description: 'AUR 包名（仅 yay/paru 脚本有效；留空则把 pkg_dir 当本地 PKGBUILD 构建）'
+        required: false
+        default: ''
+      script_dir:
+        description: '三个脚本在本仓库的相对目录（默认根目录 .）'
+        required: false
+        default: '.'
+      jobs:
+        description: '编译并行度 -j'
+        required: false
+        default: '4'
+      predeps:
+        description: '预装包，空格分隔（钉死虚拟依赖提供者，如 gcc-arm-none-eabi-bin）'
+        required: false
+        default: ''
+      nocheck:
+        description: '跳过 check()（makepkg --nocheck）'
+        type: boolean
+        default: false
+      release_tag:
+        description: 'Release tag；留空自动用 <pkgname>-<pkgver>-<pkgrel>'
+        required: false
+        default: ''
+      draft:
+        description: '发布为草稿'
+        type: boolean
+        default: false
+      prerelease:
+        description: '标记为预发布'
+        type: boolean
+        default: false
+      free_disk:
+        description: '先清理 runner 上无用的预装 SDK（内核这类大包建议开）'
+        type: boolean
+        default: true
+      runner:
+        description: 'runner 标签（arm64 必须）'
+        required: false
+        default: 'ubuntu-24.04-arm'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-pkg-${{ inputs.release_tag || inputs.pkg_dir }}-${{ inputs.script }}
+  cancel-in-progress: false
+
+env:
+  IMG: menci/archlinuxarm:base-devel
+  SCRIPT_NAME: ${{ inputs.script }}
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 360
+
+    steps:
+      - name: 检出构建脚本仓库
+        uses: actions/checkout@v4
+        with:
+          path: ci
+
+      - name: 环境信息
+        run: |
+          uname -m
+          nproc
+          docker version --format '{{.Server.Version}}' || docker version
+          df -h / /home/runner
+
+      - name: 清理磁盘
+        if: inputs.free_disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: 定位构建脚本并校验参数
+        id: prep
+        env:
+          REPO_URL: ${{ inputs.repo_url }}
+          SCRIPT_DIR: ${{ inputs.script_dir }}
+          PKG_DIR: ${{ inputs.pkg_dir }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+
+          SCRIPT="$GITHUB_WORKSPACE/ci/${SCRIPT_DIR}/${SCRIPT_NAME}"
+          if [[ ! -f "$SCRIPT" ]]; then
+            echo "==> 指定路径没找到，全局搜一下"
+            SCRIPT=$(find "$GITHUB_WORKSPACE/ci" -maxdepth 4 -name "$SCRIPT_NAME" -type f | head -1)
+          fi
+          [[ -f "$SCRIPT" ]] || { echo "ERROR: 仓库里找不到 $SCRIPT_NAME，请设置 script_dir"; exit 1; }
+          bash -n "$SCRIPT"
+          echo "script=$SCRIPT" >> "$GITHUB_OUTPUT"
+          echo "==> 使用脚本: $SCRIPT"
+
+          # build-pkg.sh 只能构建本地目录；yay/paru 还支持直接给 AUR 包名
+          if [[ -z "$REPO_URL" && ( "$SCRIPT_NAME" == "build-pkg.sh" || -z "$TARGET" ) ]]; then
+            echo "ERROR: 需要填 repo_url（或对 yay/paru 脚本填 target=AUR包名）"; exit 1
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/pkg-src"
+
+      - name: 克隆 PKGBUILD 仓库
+        if: inputs.repo_url != ''
+        env:
+          REPO_URL: ${{ inputs.repo_url }}
+          REPO_REF: ${{ inputs.repo_ref }}
+          TOKEN: ${{ secrets.PKG_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          URL="$REPO_URL"
+          if [[ -n "${TOKEN:-}" && "$URL" == https://github.com/* ]]; then
+            URL="https://x-access-token:${TOKEN}@github.com/${URL#https://github.com/}"
+          fi
+          REF_ARGS=()
+          [[ -n "${REPO_REF:-}" ]] && REF_ARGS=(--branch "$REPO_REF")
+          rm -rf pkg-src
+          git clone --depth 1 "${REF_ARGS[@]}" "$URL" pkg-src
+          git -C pkg-src log -1 --oneline
+
+      - name: 解析构建目标
+        id: tgt
+        env:
+          PKG_DIR: ${{ inputs.pkg_dir }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          PKG_PATH=$(realpath "$GITHUB_WORKSPACE/pkg-src/${PKG_DIR}")
+          if [[ "$SCRIPT_NAME" == "build-pkg.sh" ]]; then
+            [[ -f "$PKG_PATH/PKGBUILD" ]] || { echo "ERROR: $PKG_PATH 下没有 PKGBUILD"; exit 1; }
+            ARG="$PKG_PATH"
+          elif [[ -n "${TARGET:-}" ]]; then
+            ARG="$TARGET"          # AUR 包名，由 yay/paru 自己拉取
+          else
+            [[ -f "$PKG_PATH/PKGBUILD" ]] || { echo "ERROR: $PKG_PATH 下没有 PKGBUILD"; exit 1; }
+            ARG="$PKG_PATH"
+          fi
+          echo "arg=$ARG" >> "$GITHUB_OUTPUT"
+          echo "==> 目标: $ARG"
+
+      - name: 预拉基础镜像
+        run: docker pull "$IMG"
+
+      - name: 构建 pkg 包
+        id: build
+        env:
+          OUT: ${{ github.workspace }}/out
+          JOBS: ${{ inputs.jobs }}
+          PREDEPS: ${{ inputs.predeps }}
+          NOCHECK: ${{ inputs.nocheck && '1' || '0' }}
+        run: |
+          set -o pipefail
+          bash "${{ steps.prep.outputs.script }}" "${{ steps.tgt.outputs.arg }}"
+
+      - name: 汇总产物并计算 tag
+        id: meta
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=("$GITHUB_WORKSPACE"/out/*.pkg.tar.*)
+          if (( ${#FILES[@]} == 0 )); then
+            echo "ERROR: out 里没有任何 .pkg.tar.* 产物"; ls -la "$GITHUB_WORKSPACE/out"; exit 1
+          fi
+          ls -lh "${FILES[@]}"
+
+          TAG="${{ inputs.release_tag }}"
+          if [[ -z "$TAG" ]]; then
+            BASE=$(basename "$(printf '%s\n' "${FILES[@]}" | grep -v '\.sig$' | head -1)")
+            TAG=$(printf '%s' "$BASE" | sed -E 's/-(x86_64|aarch64|armv7h|armv6h|i686|any)\.pkg\.tar\..*$//')
+          fi
+          [[ -n "$TAG" ]] || TAG="build-${GITHUB_RUN_NUMBER}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "==> Release tag: $TAG"
+
+      - name: 上传 workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ steps.meta.outputs.tag }}
+          path: out/*.pkg.tar.*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 发布到 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          files: out/*.pkg.tar.*
+          fail_on_unmatched_files: true
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          body: |
+            Arch/aarch64 构建产物
+
+            - 脚本：`${{ inputs.script }}`
+            - 目标：`${{ steps.tgt.outputs.arg }}`
+            - 仓库：`${{ inputs.repo_url || '（AUR 直接拉取）' }}` @ `${{ inputs.repo_ref || '默认分支' }}`
+            - 并行度：`-j${{ inputs.jobs }}`
+            - 基础镜像：`${{ env.IMG }}`
+            - Runner：`${{ inputs.runner }}`
+
+            安装：`sudo pacman -U <文件名>.pkg.tar.*`
+
+      - name: 失败时输出排障信息
+        if: failure()
+        run: |
+          echo "=== docker ps -a ==="
+          docker ps -a || true
+          echo "=== out 目录 ==="
+          ls -la "$GITHUB_WORKSPACE/out" || true
+          echo "=== 磁盘 ==="
+          df -h / || true
+          echo "=== 提示 ==="
+          echo "容器随 runner 一起销毁，复现请在本机跑："
+          echo "  OUT=\$PWD/out ./${{ inputs.script }} '${{ steps.tgt.outputs.arg }}'"
