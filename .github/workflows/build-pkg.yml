@@ -1,7 +1,12 @@
 name: Build Arch PKG (arm64)
 
 # 放在「存放三个 build-*.sh 的仓库」里：.github/workflows/build-pkg.yml
-# 三个脚本默认取仓库根目录，可用 script_dir 指向子目录（如 scripts）
+# 脚本默认取仓库根目录，找不到会在仓库内 maxdepth 4 搜索同名文件
+#
+# 固定值（不再作为输入）：
+#   runner = ubuntu-24.04-arm     并行度 = -j4
+#   script_dir = 仓库根           draft / prerelease = false
+#   构建前清理 runner 预装 SDK（内核这类大包必须）
 
 on:
   workflow_dispatch:
@@ -31,14 +36,6 @@ on:
         description: 'AUR 包名（仅 yay/paru 脚本有效；留空则把 pkg_dir 当本地 PKGBUILD 构建）'
         required: false
         default: ''
-      script_dir:
-        description: '三个脚本在本仓库的相对目录（默认根目录 .）'
-        required: false
-        default: '.'
-      jobs:
-        description: '编译并行度 -j'
-        required: false
-        default: '4'
       predeps:
         description: '预装包，空格分隔（钉死虚拟依赖提供者，如 gcc-arm-none-eabi-bin）'
         required: false
@@ -51,22 +48,6 @@ on:
         description: 'Release tag；留空自动用 <pkgname>-<pkgver>-<pkgrel>'
         required: false
         default: ''
-      draft:
-        description: '发布为草稿'
-        type: boolean
-        default: false
-      prerelease:
-        description: '标记为预发布'
-        type: boolean
-        default: false
-      free_disk:
-        description: '先清理 runner 上无用的预装 SDK（内核这类大包建议开）'
-        type: boolean
-        default: true
-      runner:
-        description: 'runner 标签（arm64 必须）'
-        required: false
-        default: 'ubuntu-24.04-arm'
 
 permissions:
   contents: write
@@ -78,10 +59,11 @@ concurrency:
 env:
   IMG: menci/archlinuxarm:base-devel
   SCRIPT_NAME: ${{ inputs.script }}
+  JOBS: '4'
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
 
     steps:
@@ -98,7 +80,6 @@ jobs:
           df -h / /home/runner
 
       - name: 清理磁盘
-        if: inputs.free_disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
@@ -108,18 +89,16 @@ jobs:
         id: prep
         env:
           REPO_URL: ${{ inputs.repo_url }}
-          SCRIPT_DIR: ${{ inputs.script_dir }}
-          PKG_DIR: ${{ inputs.pkg_dir }}
           TARGET: ${{ inputs.target }}
         run: |
           set -euo pipefail
 
-          SCRIPT="$GITHUB_WORKSPACE/ci/${SCRIPT_DIR}/${SCRIPT_NAME}"
+          SCRIPT="$GITHUB_WORKSPACE/ci/${SCRIPT_NAME}"
           if [[ ! -f "$SCRIPT" ]]; then
-            echo "==> 指定路径没找到，全局搜一下"
+            echo "==> 仓库根没找到，全局搜一下"
             SCRIPT=$(find "$GITHUB_WORKSPACE/ci" -maxdepth 4 -name "$SCRIPT_NAME" -type f | head -1)
           fi
-          [[ -f "$SCRIPT" ]] || { echo "ERROR: 仓库里找不到 $SCRIPT_NAME，请设置 script_dir"; exit 1; }
+          [[ -f "$SCRIPT" ]] || { echo "ERROR: 仓库里找不到 $SCRIPT_NAME"; exit 1; }
           bash -n "$SCRIPT"
           echo "script=$SCRIPT" >> "$GITHUB_OUTPUT"
           echo "==> 使用脚本: $SCRIPT"
@@ -172,14 +151,13 @@ jobs:
         run: docker pull "$IMG"
 
       - name: 构建 pkg 包
-        id: build
         env:
           OUT: ${{ github.workspace }}/out
-          JOBS: ${{ inputs.jobs }}
           PREDEPS: ${{ inputs.predeps }}
           NOCHECK: ${{ inputs.nocheck && '1' || '0' }}
         run: |
           set -o pipefail
+          echo "==> MAKEFLAGS=-j$JOBS"
           bash "${{ steps.prep.outputs.script }}" "${{ steps.tgt.outputs.arg }}"
 
       - name: 汇总产物并计算 tag
@@ -217,8 +195,6 @@ jobs:
           name: ${{ steps.meta.outputs.tag }}
           files: out/*.pkg.tar.*
           fail_on_unmatched_files: true
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
           generate_release_notes: true
           body: |
             Arch/aarch64 构建产物
@@ -226,9 +202,9 @@ jobs:
             - 脚本：`${{ inputs.script }}`
             - 目标：`${{ steps.tgt.outputs.arg }}`
             - 仓库：`${{ inputs.repo_url || '（AUR 直接拉取）' }}` @ `${{ inputs.repo_ref || '默认分支' }}`
-            - 并行度：`-j${{ inputs.jobs }}`
+            - 并行度：`-j${{ env.JOBS }}`
             - 基础镜像：`${{ env.IMG }}`
-            - Runner：`${{ inputs.runner }}`
+            - Runner：`ubuntu-24.04-arm`
 
             安装：`sudo pacman -U <文件名>.pkg.tar.*`
 
@@ -243,4 +219,4 @@ jobs:
           df -h / || true
           echo "=== 提示 ==="
           echo "容器随 runner 一起销毁，复现请在本机跑："
-          echo "  OUT=\$PWD/out ./${{ inputs.script }} '${{ steps.tgt.outputs.arg }}'"
+          echo "  OUT=\$PWD/out JOBS=4 ./${{ inputs.script }} '${{ steps.tgt.outputs.arg }}'"
