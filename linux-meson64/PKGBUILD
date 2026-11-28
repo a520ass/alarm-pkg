@@ -16,10 +16,12 @@ makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' '
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v7.x/${_srcname}.tar.xz"
         'armbian_build::git+https://github.com/armbian/build.git#tag=v26.11.0-trunk.140'
+        'actions_build::git+https://github.com/a520ass/Actions-build.git'
         'linux.preset'
         '60-linux.hook'
         '90-linux.hook')
 md5sums=('SKIP'
+         'SKIP'
          'SKIP'
          '41cb5fef62715ead2dd109dbea8413d6'
          '0a5f16bfec6ad982a2f6782724cca8ba'
@@ -42,7 +44,7 @@ prepare() {
       patch --batch --silent -p1 -N < "${patch}"
   done
 
-  for patch in `find ${srcdir}/*.patch | LC_ALL=C sort -u`
+  for patch in `find ${srcdir}/actions_build/patch/armbian/meson64-7.3/*.patch | LC_ALL=C sort -u`
   do
       # detect and remove files which patch will create
       lsdiff -s --strip=1 "${patch}" | grep '^+' | awk '{print $2}' | xargs -I % sh -c 'rm -f %'
